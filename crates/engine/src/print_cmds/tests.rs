@@ -286,9 +286,12 @@ fn scale_to_fit_fills_the_printable_area() {
     // Borderless: the whole sheet is printable. The 2:1 image spans the full width, centred.
     let full = fit(json!({"printable": [0.0, 0.0, pw, ph]}));
     assert!(near(&full, &[0.0, (ph - pw / 2.0) / 2.0, pw, pw / 2.0]), "{full:?}");
-    // A reported area a hair bigger than the sheet is clipped to it.
-    let r = fit(json!({"printable": [-1.0, -1.0, 600.0, 850.0]}));
-    assert!(near(&r, &full), "{r:?}");
+    // A driver's paper a fraction of a point over the named size (as a Canon PRO-1000 reports A3,
+    // 0.40 × 0.59 pt over) is clipped to the sheet, and so is anything within 2 pt on every side.
+    for over in [json!([0.0, 0.0, pw + 0.4, ph + 0.59]), json!([-2.0, -2.0, pw + 4.0, ph + 4.0])] {
+        let r = fit(json!({"printable": over}));
+        assert!(near(&r, &full), "{over}: {r:?}");
+    }
     // Uneven edges: fitted to and centred in the area. 500 wide gives 500 × 250, 20 + 225 from the top.
     let r = fit(json!({"printable": [10.0, 20.0, 500.0, 700.0]}));
     assert!(near(&r, &[10.0, ph - 20.0 - 700.0 + 225.0, 500.0, 250.0]), "{r:?}");
@@ -309,8 +312,15 @@ fn scale_to_fit_fills_the_printable_area() {
         }
         s.execute("file.print", p)
     };
+    // A refused print changes nothing: the last print settings stay those of the last good one.
+    let before = last_print(&s);
+    let refused = |s: &mut Session, extra: Value| {
+        assert!(print(s, extra.clone()).is_err(), "{extra}");
+        assert_eq!(last_print(s), before, "{extra} changed the remembered settings");
+    };
     // A member that isn't a number rejects the area, rather than being dropped and the rest read
-    // as another rectangle.
+    // as another rectangle. An area that doesn't fit the paper beyond 2 pt (another paper, the
+    // other orientation, or off the sheet) is refused rather than clipped into a strip.
     for bad in [
         json!("everywhere"),
         json!([0, 0, 100]),
@@ -319,10 +329,15 @@ fn scale_to_fit_fills_the_printable_area() {
         json!(["a", "b", "c", "d"]),
         json!([0, "bad", 0, 500, 700]),
         json!([0, 0, "500", 700]),
+        json!([-1.0, -1.0, 600.0, 850.0]),
+        json!([-3.0, 0.0, pw, ph]),
+        json!([0.0, 0.0, 841.89, 1190.55]),
     ] {
-        assert!(print(&mut s, json!({"printable": bad})).is_err(), "{bad}");
+        refused(&mut s, json!({"printable": bad}));
     }
-    assert!(print(&mut s, json!({"printable": [0, 0, 60, 60], "cornerCropMarks": true})).is_err());
+    // A portrait area on a landscape layout of the same paper.
+    refused(&mut s, json!({"printable": [0.0, 0.0, pw, ph], "orientation": "landscape"}));
+    refused(&mut s, json!({"printable": [0, 0, 60, 60], "cornerCropMarks": true}));
     // A print that doesn't fit to the media never reads the area, so even a bad one can't fail it.
     for unused in [json!("everywhere"), json!([0, 0, 60, 60])] {
         let r = print(&mut s, json!({"scaleToFit": false, "cornerCropMarks": true, "printable": unused})).unwrap();

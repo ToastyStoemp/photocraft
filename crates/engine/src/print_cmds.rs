@@ -475,9 +475,16 @@ fn paper(p: &Value, cmd: &str) -> Result<(f64, f64)> {
     Ok(if p.get("orientation").and_then(Value::as_str) == Some("landscape") { (h.max(w), w.min(h)) } else { (w, h) })
 }
 
+/// How far a printable area may overhang the paper: drivers report their paper a fraction of a
+/// point off the named size (a Canon PRO-1000 reports A3 as 842.29 × 1191.14 pt for 841.89 ×
+/// 1190.55), and 2 pt is what `print_windows` allows between the driver's paper and the layout's.
+const PRINTABLE_SLACK: f64 = 2.0;
+
 /// The `printable` parameter: the area of the sheet the printer can print, `[x, y, w, h]` in points
-/// from the paper's top-left (as `file.print.page` reports it), clipped to the paper. A driver may
-/// report a hair more than the sheet, and a borderless paper reports all of it. `None` when absent.
+/// from the paper's top-left (as `file.print.page` reports it). An overhang of up to
+/// `PRINTABLE_SLACK` is clipped; an area that doesn't fit the paper beyond that (another paper, or
+/// the other orientation) is refused rather than clipped into a strip the image would be fitted to.
+/// A borderless paper reports all of the sheet. `None` when absent.
 fn printable(p: &Value, (pw, ph): (f64, f64), cmd: &str) -> Result<Option<(f64, f64, f64, f64)>> {
     let Some(v) = p.get("printable").filter(|v| !v.is_null()) else { return Ok(None) };
     // Every member a number: dropping a bad one would shift the rest into another area.
@@ -485,11 +492,14 @@ fn printable(p: &Value, (pw, ph): (f64, f64), cmd: &str) -> Result<Option<(f64, 
     let [x, y, w, h] = nums.as_deref().unwrap_or_default() else {
         return Err(bad(cmd, "printable is [x, y, width, height] in points from the paper's top-left"));
     };
+    if !(*x >= -PRINTABLE_SLACK && *y >= -PRINTABLE_SLACK && x + w <= pw + PRINTABLE_SLACK && y + h <= ph + PRINTABLE_SLACK) {
+        return Err(bad(cmd, "the printable area doesn't fit the paper and orientation"));
+    }
     let (left, top) = (x.max(0.0), y.max(0.0));
     let (right, bottom) = ((x + w).min(pw), (y + h).min(ph));
-    // Same floor as the paper itself; also rejects an area off the sheet.
+    // Same floor as the paper itself.
     if !(right - left > 36.0 && bottom - top > 36.0) {
-        return Err(bad(cmd, "printable area is too small or not on the paper"));
+        return Err(bad(cmd, "the printable area is too small"));
     }
     Ok(Some((left, top, right - left, bottom - top)))
 }

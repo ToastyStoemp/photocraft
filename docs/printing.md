@@ -47,8 +47,10 @@ one; the Print dialog takes it from the driver with the paper while it is printi
 borderless paper is printable to the edge, so the image fills the sheet; crop and registration
 marks keep 36 pt inside the area. Without a printable area (print to PDF, dry runs, CUPS) the image
 fits the paper less 0.25 in on each side; a dry run that should show a printer's area passes the
-`printable` that `file.print.page` reports. Only a fitted print reads the area, and it is not
-remembered with the last print settings: it is the driver's to say each time.
+`printable` that `file.print.page` reports. An area may overhang the paper by up to 2 pt (drivers
+report their paper a fraction of a point off the named size), which is clipped; one that doesn't
+fit the paper and orientation beyond that is refused. Only a fitted print reads the area, and it is
+not remembered with the last print settings: it is the driver's to say each time.
 
 ## Results
 
