@@ -871,12 +871,12 @@ fn print_paper_controls(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     }
 }
 
-fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) {
-    let t = Tokens::get(ui.ctx());
-    let Some(doc) = app.session.active().map(|d| d.doc.clone()) else { return };
-    // PDF exports and previews retain editable paper on Windows too. Only a real native
-    // submission takes its media from the printer; entering that mode refreshes the driver
-    // geometry after any export-only paper edits.
+/// The printers when the dialog is printing to one (Windows, not a dry run or PDF), else `None`.
+/// PDF exports and previews retain editable paper on Windows too. Only a real native submission
+/// takes its media from the printer; entering that mode refreshes the driver geometry after any
+/// export-only paper edits. Leaving it drops the driver's printable area, so a PDF keeps the
+/// paper's safety margin (#7782).
+fn printer_mode(f: &mut Map<String, Value>) -> Option<Vec<String>> {
     let printers: Option<Vec<String>> = if !b(f, "dryRun", false) && s(f, "output", "").is_empty() {
         f.get("__printers").and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
     } else {
@@ -889,7 +889,15 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
         }
     } else {
         f.remove("__driverPageInitialized");
+        f.remove("printable");
     }
+    printers
+}
+
+fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) {
+    let t = Tokens::get(ui.ctx());
+    let Some(doc) = app.session.active().map(|d| d.doc.clone()) else { return };
+    let printers = printer_mode(f);
     let p = params(f);
     ui.horizontal_top(|ui| {
         // Page preview.
@@ -1500,6 +1508,22 @@ mod tests {
         driver_page(&mut f);
         assert!(f.get("printable").is_none());
         assert!(f.get("__pageError").is_some());
+    }
+
+    /// #7782: switching the dialog to print to PDF, or to a dry run, leaves printer mode and drops
+    /// the driver's printable area with it, so the PDF keeps the paper's safety margin.
+    #[test]
+    fn leaving_printer_mode_drops_the_driver_printable_area() {
+        for (k, v) in [("output", json!("C:/out/print.pdf")), ("dryRun", json!(true))] {
+            let mut f = Map::new();
+            f.insert("__printers".into(), json!(["Canon PRO-1000 series"]));
+            f.insert("__driverPageInitialized".into(), json!(true));
+            f.insert("printable".into(), json!([0.0, 0.0, 841.89, 1190.55]));
+            f.insert(k.into(), v);
+            assert!(printer_mode(&mut f).is_none(), "{k}");
+            assert!(f.get("printable").is_none(), "{k}");
+            assert!(f.get("__driverPageInitialized").is_none(), "{k}: printer mode refreshes on return");
+        }
     }
 }
 

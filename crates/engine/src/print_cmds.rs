@@ -480,8 +480,9 @@ fn paper(p: &Value, cmd: &str) -> Result<(f64, f64)> {
 /// report a hair more than the sheet, and a borderless paper reports all of it. `None` when absent.
 fn printable(p: &Value, (pw, ph): (f64, f64), cmd: &str) -> Result<Option<(f64, f64, f64, f64)>> {
     let Some(v) = p.get("printable").filter(|v| !v.is_null()) else { return Ok(None) };
-    let nums: Vec<f64> = v.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
-    let [x, y, w, h] = nums.as_slice() else {
+    // Every member a number: dropping a bad one would shift the rest into another area.
+    let nums: Option<Vec<f64>> = v.as_array().and_then(|a| a.iter().map(Value::as_f64).collect());
+    let [x, y, w, h] = nums.as_deref().unwrap_or_default() else {
         return Err(bad(cmd, "printable is [x, y, width, height] in points from the paper's top-left"));
     };
     let (left, top) = (x.max(0.0), y.max(0.0));
@@ -522,8 +523,9 @@ pub fn layout(doc: &Document, p: &Value, cmd: &str) -> Result<PrintLayout> {
     let fit = p.get("scaleToFit").and_then(Value::as_bool).unwrap_or(false);
     // Scale to Fit Media fits the printable area the printer reports, as Photoshop does: the whole
     // sheet for a borderless paper (#7782). Marks still need their room inside it. Without a
-    // printable area (PDF, CUPS) the paper less a safety margin stands in for it.
-    let fit_area = match printable(p, (pw, ph), cmd)? {
+    // printable area (PDF, CUPS) the paper less a safety margin stands in for it. Only a fitted
+    // print reads the area, so it can't fail or move one that doesn't use it.
+    let fit_area = match if fit { printable(p, (pw, ph), cmd)? } else { None } {
         Some((x, y, w, h)) => {
             let inset = if any_marks { 36.0 } else { 0.0 };
             let area = (x + inset, y + inset, w - 2.0 * inset, h - 2.0 * inset);
@@ -560,9 +562,10 @@ pub fn layout(doc: &Document, p: &Value, cmd: &str) -> Result<PrintLayout> {
 }
 
 /// The print params with the printer's own printable area, so Scale to Fit Media fills what the
-/// printer can print (#7782): on Windows, for a job going to a printer that fits to the media and
-/// names no area itself. Where no driver answers (no printer, a sandbox, other systems) the params
-/// stay as they are and the fit keeps its safety margin.
+/// printer can print (#7782): on Windows, for a job being sent to a printer (on the print worker,
+/// never for a dry run) that fits to the media and names no area itself. Where no driver answers
+/// (no printer, a sandbox, other systems) the params stay as they are and the fit keeps its
+/// safety margin.
 fn with_driver_printable(p: &Value, to_printer: bool) -> Value {
     let mut q = p.clone();
     let fits = p.get("scaleToFit").and_then(Value::as_bool).unwrap_or(false);
@@ -595,7 +598,7 @@ fn do_print(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     let doc_id = doc.id;
     let params = p.clone();
     let worker_params = params.clone();
-    let to_printer = send && output.is_none();
+    let to_printer = output.is_none();
     let command = cmd.to_string();
     let spooler = s.print_spooler.clone();
     if send && !dry {
@@ -626,7 +629,9 @@ fn do_print(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
             },
         );
     }
-    let result = render_and_spool(&doc, &with_driver_printable(p, to_printer), cmd, spooler.as_ref())?;
+    // Dry runs and PDF output stay off the driver: this path runs on the caller's thread, and a
+    // slow driver must not block it. A dry run that wants a printer's area passes `printable`.
+    let result = render_and_spool(&doc, p, cmd, spooler.as_ref())?;
     remember_print(s, p);
     crate::automate_cmds::fire_event(s, "print");
     Ok(result)
@@ -1062,7 +1067,7 @@ pub fn specs() -> Vec<CommandSpec> {
             CommandSpec { id: $id, label: $label, menu: $menu, shortcut: $sc, params: $params, enabled: $enabled, journal: true, run: $run }
         };
     }
-    const PRINT_PARAMS: &str = r##"{"printerSettings":hex? (Windows driver settings),"printer":name? (default printer),"copies":1..999=1,"paper":"letter|legal|tabloid|a3|a4|a5|4x6|5x7"|[w,h] pt="letter","orientation":"portrait|landscape"="portrait","center":bool=true,"top":in?,"left":in?,"scale":%=100,"scaleToFit":bool=false,"printable":[x,y,w,h] pt from the paper's top-left? (where Scale to Fit Media fits and centres the image; a print to a Windows printer defaults to the driver's printable area, the whole sheet when borderless; otherwise the paper less 0.25 in),"colorHandling":"printerManages|photocraftManages|noColorManagement"="printerManages","printerProfile":profile? (photocraftManages),"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true,"cornerCropMarks":bool,"centerCropMarks":bool,"registrationMarks":bool,"description":bool,"labels":bool,"emulsionDown":bool=false (mirror the page left to right, for sublimation and other transfer printing),"output":pdf path? (print to PDF; then "send" defaults to false),"send":bool?,"printServer":"host[:port]|socket path"? (default: the system's CUPS; a named server is always printed to over IPP),"dryRun":bool=false (render the PDF, report the backend command, don't spool; write a PDF only at an explicit output path)} → {pdf:path|null (null without explicit output), imageRect, command:diagnostic array|null, sent, spooler:where the job went|null, backend:"lp|windows|ipp|portal"|null}"##;
+    const PRINT_PARAMS: &str = r##"{"printerSettings":hex? (Windows driver settings),"printer":name? (default printer),"copies":1..999=1,"paper":"letter|legal|tabloid|a3|a4|a5|4x6|5x7"|[w,h] pt="letter","orientation":"portrait|landscape"="portrait","center":bool=true,"top":in?,"left":in?,"scale":%=100,"scaleToFit":bool=false,"printable":[x,y,w,h] pt from the paper's top-left? (where Scale to Fit Media fits and centres the image; a print sent to a Windows printer defaults to the driver's printable area, the whole sheet when borderless; dry runs and PDF output use the paper less 0.25 in unless given one),"colorHandling":"printerManages|photocraftManages|noColorManagement"="printerManages","printerProfile":profile? (photocraftManages),"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true,"cornerCropMarks":bool,"centerCropMarks":bool,"registrationMarks":bool,"description":bool,"labels":bool,"emulsionDown":bool=false (mirror the page left to right, for sublimation and other transfer printing),"output":pdf path? (print to PDF; then "send" defaults to false),"send":bool?,"printServer":"host[:port]|socket path"? (default: the system's CUPS; a named server is always printed to over IPP),"dryRun":bool=false (render the PDF, report the backend command, don't spool; write a PDF only at an explicit output path)} → {pdf:path|null (null without explicit output), imageRect, command:diagnostic array|null, sent, spooler:where the job went|null, backend:"lp|windows|ipp|portal"|null}"##;
 
     vec![
         spec!("file.print", "Print…", &["File"], Some("Cmd+P"), PRINT_PARAMS, native_doc, print),

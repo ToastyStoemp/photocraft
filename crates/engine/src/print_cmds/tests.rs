@@ -309,10 +309,26 @@ fn scale_to_fit_fills_the_printable_area() {
         }
         s.execute("file.print", p)
     };
-    for bad in [json!("everywhere"), json!([0, 0, 100]), json!([0, 0, 10, 10]), json!([700, 0, 100, 100]), json!(["a", "b", "c", "d"])] {
+    // A member that isn't a number rejects the area, rather than being dropped and the rest read
+    // as another rectangle.
+    for bad in [
+        json!("everywhere"),
+        json!([0, 0, 100]),
+        json!([0, 0, 10, 10]),
+        json!([700, 0, 100, 100]),
+        json!(["a", "b", "c", "d"]),
+        json!([0, "bad", 0, 500, 700]),
+        json!([0, 0, "500", 700]),
+    ] {
         assert!(print(&mut s, json!({"printable": bad})).is_err(), "{bad}");
     }
     assert!(print(&mut s, json!({"printable": [0, 0, 60, 60], "cornerCropMarks": true})).is_err());
+    // A print that doesn't fit to the media never reads the area, so even a bad one can't fail it.
+    for unused in [json!("everywhere"), json!([0, 0, 60, 60])] {
+        let r = print(&mut s, json!({"scaleToFit": false, "cornerCropMarks": true, "printable": unused})).unwrap();
+        let rect: Vec<f64> = serde_json::from_value(r["imageRect"].clone()).unwrap();
+        assert!(near(&rect, &[(pw - 300.0) / 2.0, (ph - 150.0) / 2.0, 300.0, 150.0]), "{rect:?}");
+    }
     // The area is the driver's to say at print time, so it is not remembered.
     print(&mut s, json!({"printable": [0, 0, 595, 841]})).unwrap();
     assert!(last_print(&s).unwrap().get("printable").is_none());

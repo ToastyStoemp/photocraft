@@ -42,10 +42,12 @@ spooling.
 
 Scale to Fit Media fits the image to the printable area, `"printable": [x, y, w, h]` in points from
 the paper's top-left (what `file.print.page` reports), and centres it there. On Windows a print
-going to a printer takes that area from the driver unless the command names one, and the Print
-dialog takes it from the driver with the paper. A borderless paper is printable to the edge, so the
-image fills the sheet; crop and registration marks keep 36 pt inside the area. Without a printable
-area (print to PDF, CUPS) the image fits the paper less 0.25 in on each side. The area is not
+sent to a printer takes that area from the driver, on the print worker, unless the command names
+one; the Print dialog takes it from the driver with the paper while it is printing to a printer. A
+borderless paper is printable to the edge, so the image fills the sheet; crop and registration
+marks keep 36 pt inside the area. Without a printable area (print to PDF, dry runs, CUPS) the image
+fits the paper less 0.25 in on each side; a dry run that should show a printer's area passes the
+`printable` that `file.print.page` reports. Only a fitted print reads the area, and it is not
 remembered with the last print settings: it is the driver's to say each time.
 
 ## Results
