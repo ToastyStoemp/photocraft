@@ -334,6 +334,27 @@ fn scale_to_fit_fills_the_printable_area() {
     assert!(last_print(&s).unwrap().get("printable").is_none());
 }
 
+/// #7782: a driver page whose paper is the one laid out lends its printable area, and the fit
+/// follows it; a page of another paper (or of the same paper turned) lends nothing.
+#[test]
+fn a_matching_driver_page_lends_its_printable_area_to_the_fit() {
+    // Borderless A3 as a Canon PRO-1000 driver reports it: a hair over A3, printable to the edge.
+    let (page, area) = ((842.29, 1191.14), (0.0, 0.0, 842.29, 1191.14));
+    let p = json!({"paper": "a3", "scaleToFit": true, "dryRun": true, "send": false});
+    let q = with_page_printable(&p, page, area);
+    assert_eq!(q["printable"], json!([0.0, 0.0, 842.29, 1191.14]));
+    // The fit then fills the sheet: the 2:1 image spans the whole A3 width from the left edge.
+    let mut s = session("rgb", 8);
+    let rect: Vec<f64> = serde_json::from_value(s.execute("file.print", q).unwrap()["imageRect"].clone()).unwrap();
+    assert!(rect[0].abs() < 1e-6 && (rect[2] - 841.89).abs() < 1e-6, "{rect:?}");
+    // Landscape A3 is the sheet turned: a portrait page of it lends nothing.
+    let landscape = json!({"paper": "a3", "orientation": "landscape", "scaleToFit": true});
+    assert!(with_page_printable(&landscape, page, area).get("printable").is_none());
+    // An A4 page for an A3 layout lends nothing, nor does a layout without a valid paper.
+    assert!(with_page_printable(&p, (595.32, 841.92), (9.6, 14.16, 576.0, 813.6)).get("printable").is_none());
+    assert!(with_page_printable(&json!({"paper": "napkin"}), page, area).get("printable").is_none());
+}
+
 /// #7782: the driver is asked for its printable area only for a fitted print to a local printer
 /// that names no area itself; anything else, odd params included, passes through unchanged.
 #[test]

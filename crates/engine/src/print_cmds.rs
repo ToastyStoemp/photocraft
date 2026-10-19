@@ -567,20 +567,31 @@ pub fn layout(doc: &Document, p: &Value, cmd: &str) -> Result<PrintLayout> {
 /// (no printer, a sandbox, other systems) the params stay as they are and the fit keeps its
 /// safety margin.
 fn with_driver_printable(p: &Value, to_printer: bool) -> Value {
-    let mut q = p.clone();
+    let q = p.clone();
     let fits = p.get("scaleToFit").and_then(Value::as_bool).unwrap_or(false);
     let named_server = p.get("printServer").and_then(Value::as_str).is_some_and(|v| !v.is_empty());
     if !cfg!(windows) || !to_printer || !fits || named_server || p.get("printable").is_some() {
         return q;
     }
-    let (Ok(printer), Ok(settings), Ok((pw, ph))) = (printer_name(p), printer_settings(p), paper(p, "file.print")) else { return q };
-    if let (Ok(page), Some(o)) = (craft_print::rgb::page(&printer, settings.as_ref()), q.as_object_mut()) {
-        // Only for the paper being laid out (the tolerance `print_windows` allows): a driver set to
-        // another paper is refused at print time, and its area would misplace the image on this one.
-        if (page.paper.0 - pw).abs() <= 2.0 && (page.paper.1 - ph).abs() <= 2.0 {
-            let (x, y, w, h) = page.printable;
-            o.insert("printable".into(), json!([x, y, w, h]));
-        }
+    let (Ok(printer), Ok(settings)) = (printer_name(p), printer_settings(p)) else { return q };
+    match craft_print::rgb::page(&printer, settings.as_ref()) {
+        Ok(page) => with_page_printable(p, page.paper, page.printable),
+        Err(_) => q,
+    }
+}
+
+/// `p` with the printable area of a driver page, when the page's paper is the paper being laid
+/// out (within the 2 pt `print_windows` allows): a driver set to another paper is refused at print
+/// time, and its area would misplace the image on this one. Otherwise `p` as it is.
+fn with_page_printable(p: &Value, page_paper: (f64, f64), printable: (f64, f64, f64, f64)) -> Value {
+    let mut q = p.clone();
+    let Ok((pw, ph)) = paper(p, "file.print") else { return q };
+    if (page_paper.0 - pw).abs() <= 2.0
+        && (page_paper.1 - ph).abs() <= 2.0
+        && let Some(o) = q.as_object_mut()
+    {
+        let (x, y, w, h) = printable;
+        o.insert("printable".into(), json!([x, y, w, h]));
     }
     q
 }
