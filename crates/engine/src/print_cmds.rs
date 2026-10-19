@@ -521,6 +521,7 @@ pub fn layout(doc: &Document, p: &Value, cmd: &str) -> Result<PrintLayout> {
     let any_marks = marks.corner_crop || marks.center_crop || marks.registration;
     let margin = if any_marks { 36.0 } else { 18.0 };
     let fit = p.get("scaleToFit").and_then(Value::as_bool).unwrap_or(false);
+    let emulsion_down = p.get("emulsionDown").and_then(Value::as_bool).unwrap_or(false);
     // Scale to Fit Media fits the printable area the printer reports, as Photoshop does: the whole
     // sheet for a borderless paper (#7782). Marks still need their room inside it. Without a
     // printable area (PDF, CUPS) the paper less a safety margin stands in for it. Only a fitted
@@ -528,6 +529,10 @@ pub fn layout(doc: &Document, p: &Value, cmd: &str) -> Result<PrintLayout> {
     let fit_area = match if fit { printable(p, (pw, ph), cmd)? } else { None } {
         Some((x, y, w, h)) => {
             let inset = if any_marks { 36.0 } else { 0.0 };
+            // Emulsion Down mirrors the page after layout, so the image is fitted to the mirror of
+            // the printable area: once flipped it lands in the area itself, even when the driver's
+            // left and right margins differ.
+            let x = if emulsion_down { pw - x - w } else { x };
             let area = (x + inset, y + inset, w - 2.0 * inset, h - 2.0 * inset);
             if !(area.2 > 0.0 && area.3 > 0.0) {
                 return Err(bad(cmd, "the printable area leaves no room for the image inside the printer marks"));
@@ -557,7 +562,6 @@ pub fn layout(doc: &Document, p: &Value, cmd: &str) -> Result<PrintLayout> {
         let left = p.get("left").and_then(Value::as_f64).unwrap_or(0.0) * 72.0;
         (left, ph - top - h)
     };
-    let emulsion_down = p.get("emulsionDown").and_then(Value::as_bool).unwrap_or(false);
     Ok(PrintLayout { paper: (pw, ph), rect: (x, y, w, h), scale, marks, emulsion_down })
 }
 

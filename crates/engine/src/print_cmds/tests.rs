@@ -334,6 +334,29 @@ fn scale_to_fit_fills_the_printable_area() {
     assert!(last_print(&s).unwrap().get("printable").is_none());
 }
 
+/// #7782: Emulsion Down mirrors the page after layout, so a fitted image is placed in the mirror
+/// of the printable area and lands in the area itself once flipped, also with uneven margins
+/// (10 pt unprintable on the left, 40 pt on the right).
+#[test]
+fn emulsion_down_fits_into_the_printable_area_once_mirrored() {
+    let mut s = session("rgb", 8);
+    let pw = 595.28;
+    let area = json!([10.0, 0.0, pw - 50.0, 841.89]);
+    let rect = |s: &mut Session, mirror: bool| -> Vec<f64> {
+        let p = json!({"paper": "a4", "scaleToFit": true, "printable": area, "emulsionDown": mirror, "dryRun": true, "send": false});
+        serde_json::from_value(s.execute("file.print", p).unwrap()["imageRect"].clone()).unwrap()
+    };
+    // Unmirrored: the 2:1 image fills the area's width from its left edge, 10 pt in.
+    let plain = rect(&mut s, false);
+    assert!((plain[0] - 10.0).abs() < 1e-6 && (plain[2] - (pw - 50.0)).abs() < 1e-6, "{plain:?}");
+    // Mirrored: laid out 40 pt in, so the flip (x -> pw - x - w, as the PDF and GDI routes draw it)
+    // puts it back at 10 pt, inside the area, rather than 30 pt into the right margin.
+    let mirrored = rect(&mut s, true);
+    assert!((mirrored[0] - 40.0).abs() < 1e-6 && (mirrored[2] - plain[2]).abs() < 1e-6, "{mirrored:?}");
+    let printed_left = pw - mirrored[0] - mirrored[2];
+    assert!((printed_left - 10.0).abs() < 1e-6, "{printed_left}");
+}
+
 /// #7782: a driver page whose paper is the one laid out lends its printable area, and the fit
 /// follows it; a page of another paper (or of the same paper turned) lends nothing.
 #[test]
