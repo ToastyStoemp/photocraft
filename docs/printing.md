@@ -38,6 +38,16 @@ with a `note` when no server answers. `"printServer"` on `file.print` sends one 
 server; `"dryRun": true` renders the page and reports the equivalent `lp` command without
 spooling.
 
+## Scale to Fit Media
+
+Scale to Fit Media fits the image to the printable area, `"printable": [x, y, w, h]` in points from
+the paper's top-left (what `file.print.page` reports), and centres it there. On Windows a print
+going to a printer takes that area from the driver unless the command names one, and the Print
+dialog takes it from the driver with the paper. A borderless paper is printable to the edge, so the
+image fills the sheet; crop and registration marks keep 36 pt inside the area. Without a printable
+area (print to PDF, CUPS) the image fits the paper less 0.25 in on each side. The area is not
+remembered with the last print settings: it is the driver's to say each time.
+
 ## Results
 
 `file.print` returns `sent`, `backend` (`lp`, `windows`, `ipp`, `portal`), `spooler` (where the

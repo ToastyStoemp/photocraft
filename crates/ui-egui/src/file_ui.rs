@@ -771,7 +771,8 @@ pub fn open_print(app: &mut PhotocraftApp) -> u64 {
     app.ui.open_dialog(DialogKind::Command, f)
 }
 
-/// Takes the paper from the printer's driver settings (Windows), as Photoshop does.
+/// Takes the paper from the printer's driver settings (Windows), as Photoshop does, and the area it
+/// can print, which Scale to Fit Media fills (the whole sheet when borderless, #7782).
 fn driver_page(f: &mut Map<String, Value>) {
     let printer = s(f, "printer", "");
     let settings = f.get("printerSettings").and_then(Value::as_str).and_then(|h| craft_print::rgb::DevMode::from_hex(h).ok());
@@ -779,9 +780,14 @@ fn driver_page(f: &mut Map<String, Value>) {
         Ok(pg) => {
             f.insert("paper".into(), json!([pg.paper.0, pg.paper.1]));
             f.insert("orientation".into(), json!("portrait"));
+            let (x, y, w, h) = pg.printable;
+            f.insert("printable".into(), json!([x, y, w, h]));
             f.remove("__pageError");
         }
         Err(e) => {
+            // No page from this driver: no printable area either, so the print falls back to the
+            // paper less its safety margin rather than another printer's area.
+            f.remove("printable");
             f.insert("__pageError".into(), json!(e.to_string()));
         }
     }
@@ -1482,6 +1488,18 @@ mod tests {
             assert!(app.ui.dialog_mut(id).unwrap().fields.get("send").is_none());
             std::fs::remove_file(out).unwrap();
         }
+    }
+
+    /// #7782: a printer whose driver gives no page leaves no printable area behind, so a fitted
+    /// print falls back to the paper's safety margin rather than another printer's area.
+    #[test]
+    fn a_printer_without_a_driver_page_has_no_printable_area() {
+        let mut f = Map::new();
+        f.insert("printer".into(), json!("photocraft-no-such-printer"));
+        f.insert("printable".into(), json!([0.0, 0.0, 595.28, 841.89]));
+        driver_page(&mut f);
+        assert!(f.get("printable").is_none());
+        assert!(f.get("__pageError").is_some());
     }
 }
 

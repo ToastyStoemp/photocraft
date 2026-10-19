@@ -268,6 +268,72 @@ fn a_vanished_remembered_printer_falls_back_to_the_default() {
     assert_eq!(q, json!({"printer": "", "paper": "a5"}), "the default printer stays the default");
 }
 
+/// #7782: Scale to Fit Media fits the printable area the printer reports, not the paper less a
+/// fixed margin: a borderless paper fills the sheet, an uneven unprintable edge keeps the image off
+/// it, and marks keep their room inside the area.
+#[test]
+fn scale_to_fit_fills_the_printable_area() {
+    let mut s = session("rgb", 8);
+    let (pw, ph) = (595.28, 841.89);
+    let mut fit = |extra: Value| -> Vec<f64> {
+        let mut p = json!({"paper": "a4", "scaleToFit": true, "dryRun": true, "send": false});
+        for (k, v) in extra.as_object().unwrap() {
+            p[k] = v.clone();
+        }
+        serde_json::from_value(s.execute("file.print", p).unwrap()["imageRect"].clone()).unwrap()
+    };
+    let near = |a: &[f64], b: &[f64]| a.len() == b.len() && a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-6);
+    // Borderless: the whole sheet is printable. The 2:1 image spans the full width, centred.
+    let full = fit(json!({"printable": [0.0, 0.0, pw, ph]}));
+    assert!(near(&full, &[0.0, (ph - pw / 2.0) / 2.0, pw, pw / 2.0]), "{full:?}");
+    // A reported area a hair bigger than the sheet is clipped to it.
+    let r = fit(json!({"printable": [-1.0, -1.0, 600.0, 850.0]}));
+    assert!(near(&r, &full), "{r:?}");
+    // Uneven edges: fitted to and centred in the area. 500 wide gives 500 × 250, 20 + 225 from the top.
+    let r = fit(json!({"printable": [10.0, 20.0, 500.0, 700.0]}));
+    assert!(near(&r, &[10.0, ph - 20.0 - 700.0 + 225.0, 500.0, 250.0]), "{r:?}");
+    // Marks keep their 36 pt inside the area.
+    let r = fit(json!({"printable": [0.0, 0.0, pw, ph], "cornerCropMarks": true}));
+    assert!((r[0] - 36.0).abs() < 1e-6 && (r[2] - (pw - 72.0)).abs() < 1e-6, "{r:?}");
+    // No printable area: the paper less 18 pt, as before.
+    let r = fit(json!({}));
+    assert!((r[0] - 18.0).abs() < 1e-6 && (r[2] - (pw - 36.0)).abs() < 1e-6, "{r:?}");
+    // Without Scale to Fit Media the area changes nothing: 100 %, centred on the paper.
+    let r = fit(json!({"scaleToFit": false, "printable": [10.0, 20.0, 500.0, 700.0]}));
+    assert!(near(&r, &[(pw - 300.0) / 2.0, (ph - 150.0) / 2.0, 300.0, 150.0]), "{r:?}");
+    // A bad area is an error, never a panic; so are marks that leave no room in a small one.
+    let print = |s: &mut Session, extra: Value| {
+        let mut p = json!({"paper": "a4", "scaleToFit": true, "dryRun": true, "send": false});
+        for (k, v) in extra.as_object().unwrap() {
+            p[k] = v.clone();
+        }
+        s.execute("file.print", p)
+    };
+    for bad in [json!("everywhere"), json!([0, 0, 100]), json!([0, 0, 10, 10]), json!([700, 0, 100, 100]), json!(["a", "b", "c", "d"])] {
+        assert!(print(&mut s, json!({"printable": bad})).is_err(), "{bad}");
+    }
+    assert!(print(&mut s, json!({"printable": [0, 0, 60, 60], "cornerCropMarks": true})).is_err());
+    // The area is the driver's to say at print time, so it is not remembered.
+    print(&mut s, json!({"printable": [0, 0, 595, 841]})).unwrap();
+    assert!(last_print(&s).unwrap().get("printable").is_none());
+}
+
+/// #7782: the driver is asked for its printable area only for a fitted print to a local printer
+/// that names no area itself; anything else, odd params included, passes through unchanged.
+#[test]
+fn only_a_fitted_print_to_a_printer_asks_the_driver_for_its_printable_area() {
+    for p in [
+        json!({"scaleToFit": false}),
+        json!({"scaleToFit": true, "printable": [0, 0, 100, 100]}),
+        json!({"scaleToFit": true, "printServer": "print.example:631"}),
+        json!("not an object"),
+        json!(null),
+    ] {
+        assert_eq!(with_driver_printable(&p, true), p, "{p}");
+    }
+    assert_eq!(with_driver_printable(&json!({"scaleToFit": true}), false), json!({"scaleToFit": true}), "print to PDF");
+}
+
 #[test]
 fn print_one_copy_repeats_the_last_settings() {
     let mut s = session("rgb", 8);
