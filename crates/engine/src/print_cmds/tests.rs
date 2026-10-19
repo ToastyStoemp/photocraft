@@ -394,18 +394,26 @@ fn a_matching_driver_page_lends_its_printable_area_to_the_fit() {
 }
 
 /// #7782: the driver is asked for its printable area only for a fitted print to a local printer
-/// that names no area itself; anything else, odd params included, passes through unchanged.
+/// that names no area itself, an explicit `null` included (it names none, as `printable` reads
+/// it); anything else, odd params included, passes through unchanged. The decision is tested on
+/// every platform, not only where the driver call exists.
 #[test]
 fn only_a_fitted_print_to_a_printer_asks_the_driver_for_its_printable_area() {
-    for p in [
+    for p in [json!({"scaleToFit": true}), json!({"scaleToFit": true, "printable": null}), json!({"scaleToFit": true, "printServer": ""})] {
+        assert!(asks_driver_for_printable(&p, true), "{p}");
+    }
+    let skipped = [
         json!({"scaleToFit": false}),
         json!({"scaleToFit": true, "printable": [0, 0, 100, 100]}),
         json!({"scaleToFit": true, "printServer": "print.example:631"}),
         json!("not an object"),
         json!(null),
-    ] {
-        assert_eq!(with_driver_printable(&p, true), p, "{p}");
+    ];
+    for p in &skipped {
+        assert!(!asks_driver_for_printable(p, true), "{p}");
+        assert_eq!(&with_driver_printable(p, true), p, "{p}");
     }
+    assert!(!asks_driver_for_printable(&json!({"scaleToFit": true}), false), "print to PDF");
     assert_eq!(with_driver_printable(&json!({"scaleToFit": true}), false), json!({"scaleToFit": true}), "print to PDF");
 }
 

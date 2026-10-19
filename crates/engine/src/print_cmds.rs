@@ -575,6 +575,17 @@ pub fn layout(doc: &Document, p: &Value, cmd: &str) -> Result<PrintLayout> {
     Ok(PrintLayout { paper: (pw, ph), rect: (x, y, w, h), scale, marks, emulsion_down })
 }
 
+/// Whether a print takes its printable area from the driver: a fitted print being sent to a
+/// local printer (not a named print server) that names no area itself. An explicit `null` names
+/// none, as `printable` reads it, so it is asked too. Kept apart from the Windows-only driver
+/// call so every platform tests the same decision.
+fn asks_driver_for_printable(p: &Value, to_printer: bool) -> bool {
+    let fits = p.get("scaleToFit").and_then(Value::as_bool).unwrap_or(false);
+    let named_server = p.get("printServer").and_then(Value::as_str).is_some_and(|v| !v.is_empty());
+    let names_area = p.get("printable").is_some_and(|v| !v.is_null());
+    to_printer && fits && !named_server && !names_area
+}
+
 /// The print params with the printer's own printable area, so Scale to Fit Media fills what the
 /// printer can print (#7782): on Windows, for a job being sent to a printer (on the print worker,
 /// never for a dry run) that fits to the media and names no area itself. Where no driver answers
@@ -582,9 +593,7 @@ pub fn layout(doc: &Document, p: &Value, cmd: &str) -> Result<PrintLayout> {
 /// safety margin.
 fn with_driver_printable(p: &Value, to_printer: bool) -> Value {
     let q = p.clone();
-    let fits = p.get("scaleToFit").and_then(Value::as_bool).unwrap_or(false);
-    let named_server = p.get("printServer").and_then(Value::as_str).is_some_and(|v| !v.is_empty());
-    if !cfg!(windows) || !to_printer || !fits || named_server || p.get("printable").is_some() {
+    if !cfg!(windows) || !asks_driver_for_printable(p, to_printer) {
         return q;
     }
     let (Ok(printer), Ok(settings)) = (printer_name(p), printer_settings(p)) else { return q };
