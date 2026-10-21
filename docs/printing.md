@@ -52,6 +52,18 @@ report their paper a fraction of a point off the named size), which is clipped; 
 fit the paper and orientation beyond that is refused. Only a fitted print reads the area, and it is
 not remembered with the last print settings: it is the driver's to say each time.
 
+## Orientation (Windows)
+
+On Windows the paper and its orientation are the driver's: the Print dialog takes them from the
+printer's settings. Its Orientation buttons (Portrait, Landscape; Photoshop's Layout) turn those
+settings, as Print Settings… would, and the paper and preview turn with them.
+`file.print.page {"orientation": "portrait|landscape"}` does the same for scripts: it returns the
+turned settings as `printerSettings`, with the page they give. A print sent to a Windows printer
+whose layout is the driver's paper the other way round (a landscape layout, portrait settings)
+turns the settings to the layout before printing, rather than stopping with "the driver paper or
+orientation differs"; another paper is still refused. Scale to Fit Media then fills the printable
+area of the turned settings, and the Orientation buttons take that area with the turned paper.
+
 ## Results
 
 `file.print` returns `sent`, `backend` (`lp`, `windows`, `ipp`, `portal`), `spooler` (where the
