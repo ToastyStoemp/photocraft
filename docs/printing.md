@@ -5,6 +5,22 @@ position and scale, crop and registration marks, labels, colour handling) and ha
 to a printer. The rendering is `print_cmds.rs` in `photocraft-engine`, shared by the dialog, the
 batch commands and automation (`file.print`, `file.printOneCopy`); this page is about the hand-off.
 
+## Positioning the preview
+
+Drag the visible image on the paper to change Top and Left. Starting a drag switches Center
+off using the currently resolved layout, including Scale to Fit Media, so the image stays at
+the grab point. Top/Left stay visible but disabled while Center is on, keeping the dialog and
+paper stationary when a drag enables them. Position fields accept negative values in inches, centimetres or millimetres;
+the stored command parameters are inches from the sheet's top-left. Manual positions are
+bounded to ±10000 inches. Height, width and paper dimensions retain their positive fields.
+
+The preview converts egui point displacement to PDF points using its paper display scale.
+No extra Retina pixel factor is needed: painting and pointer input both use egui points.
+Emulsion Down reverses the horizontal position change to match the mirrored output. The image
+is clipped to the paper; any visible portion remains a drag target. A completely off-page image
+can be recovered with Top/Left or Center. These controls affect print parameters only, and
+the preview and generated PDF continue to share `print_cmds::layout`.
+
 ## Routes to the printer
 
 | Route | When | What the user sees |
@@ -38,20 +54,6 @@ with a `note` when no server answers. `"printServer"` on `file.print` sends one 
 server; `"dryRun": true` renders the page and reports the equivalent `lp` command without
 spooling.
 
-## Scale to Fit Media
-
-Scale to Fit Media fits the image to the printable area, `"printable": [x, y, w, h]` in points from
-the paper's top-left (what `file.print.page` reports), and centres it there. On Windows a print
-sent to a printer takes that area from the driver, on the print worker, unless the command names
-one; the Print dialog takes it from the driver with the paper while it is printing to a printer. A
-borderless paper is printable to the edge, so the image fills the sheet; crop and registration
-marks keep 36 pt inside the area. Without a printable area (print to PDF, dry runs, CUPS) the image
-fits the paper less 0.25 in on each side; a dry run that should show a printer's area passes the
-`printable` that `file.print.page` reports. An area may overhang the paper by up to 2 pt (drivers
-report their paper a fraction of a point off the named size), which is clipped; one that doesn't
-fit the paper and orientation beyond that is refused. Only a fitted print reads the area, and it is
-not remembered with the last print settings: it is the driver's to say each time.
-
 ## Orientation (Windows)
 
 On Windows the paper and its orientation are the driver's: the Print dialog takes them from the
@@ -62,7 +64,8 @@ turned settings as `printerSettings`, with the page they give. A print sent to a
 whose layout is the driver's paper the other way round (a landscape layout, portrait settings)
 turns the settings to the layout before printing, rather than stopping with "the driver paper or
 orientation differs"; another paper is still refused. Scale to Fit Media then fills the printable
-area of the turned settings, and the Orientation buttons take that area with the turned paper.
+area of the turned settings, so a borderless paper stays borderless the other way round too, and
+the Orientation buttons take that area with the turned paper.
 
 ## Results
 
